@@ -22,26 +22,29 @@ def main():
         st.write("データプレビュー:")
         st.write(df.head())
 
-        # 3. 5件法のカラムと時間（分）のカラムを選択
+        # 3. すべてのカラムを表示
         all_columns = df.columns.tolist()
-        likert_columns = st.multiselect("5件法のカラムを選択してください", all_columns)
-        time_columns = st.multiselect("時間（分）のカラムを選択してください", all_columns)
+        st.write("利用可能なカラム:", all_columns)
 
-        # 4. 縮約後のカラム名を入力
+        # 4. 縮約に使用するカラムを選択
+        columns_to_reduce = st.multiselect("縮約に使用するカラムを選択してください", all_columns)
+
+        # 5. 縮約後のカラム名を入力
         reduced_column_name = st.text_input("縮約後のカラム名を入力してください", "reduced_score")
 
-        if likert_columns or time_columns:
-            # 5. 処理を実行
+        if columns_to_reduce:
+            # 6. 処理を実行
             standardized_data = pd.DataFrame()
 
-            # 5件法の変数を処理
-            for col in likert_columns:
-                standardized_data[f"{col}_standardized"] = z_score_standardize(df[col])
-
-            # 時間（分）の変数を処理
-            for col in time_columns:
-                log_transformed = log_transform(df[col])
-                standardized_data[f"{col}_standardized"] = z_score_standardize(log_transformed)
+            for col in columns_to_reduce:
+                if df[col].dtype in ['int64', 'float64']:
+                    if df[col].min() >= 0 and df[col].max() <= 5:  # 5件法の判定
+                        standardized_data[f"{col}_standardized"] = z_score_standardize(df[col])
+                    else:  # 時間データの判定
+                        log_transformed = log_transform(df[col])
+                        standardized_data[f"{col}_standardized"] = z_score_standardize(log_transformed)
+                else:
+                    st.warning(f"{col} は数値データではないため、処理から除外されました。")
 
             # 縮約（平均化）
             df[reduced_column_name] = standardized_data.mean(axis=1)
@@ -55,16 +58,20 @@ def main():
 
             # 相関行列の表示
             st.write("元のカラムと縮約されたカラムの相関行列:")
-            correlation_matrix = df[likert_columns + time_columns + [reduced_column_name]].corr()
+            correlation_matrix = df[columns_to_reduce + [reduced_column_name]].corr()
             st.write(correlation_matrix)
+
+            # ダウンロード用のデータフレームを作成
+            columns_to_keep = [col for col in all_columns if col not in columns_to_reduce] + [reduced_column_name]
+            df_download = df[columns_to_keep]
 
             # 処理済みデータのダウンロード
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False, sheet_name='Sheet1')
+                df_download.to_excel(writer, index=False, sheet_name='Sheet1')
             output.seek(0)
             st.download_button(
-                label="処理済みデータをダウンロード",
+                label="処理済みデータをダウンロード（縮約に使用したカラムは削除済み）",
                 data=output,
                 file_name="processed_data.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
