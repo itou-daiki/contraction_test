@@ -4,8 +4,8 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 import io
 
-def log_transform(x):
-    return np.log1p(x)
+def log_transform(x, n):
+    return np.log1p(x) / np.log1p(n)
 
 def z_score_standardize(df, columns):
     scaler = StandardScaler()
@@ -29,17 +29,22 @@ def main():
         time_columns = st.multiselect("時間（分）のカラムを選択してください", all_columns)
         likert_columns = st.multiselect("リッカート尺度のカラムを選択してください", all_columns)
 
+        # 4. log変換の最大値nを指定
+        n = st.number_input("log変換の最大値nを指定してください（1以上の値）", min_value=1, value=5)
+
         if time_columns or likert_columns:
-            # 4. 時間データにlog(x + 1)変換を適用
+            # 5. 時間データにlog(x + 1)変換を適用（1～nの範囲）
             for col in time_columns:
                 new_col_name = f"{col}_log"
-                df[new_col_name] = log_transform(df[col])
+                # データを1～nの範囲に正規化してからlog変換
+                df[new_col_name] = df[col].clip(lower=1, upper=n)  # 1未満の値を1に、n超の値をnにクリップ
+                df[new_col_name] = log_transform(df[new_col_name], n)
 
-            # 5. Z-score標準化
+            # 6. Z-score標準化
             columns_to_standardize = [f"{col}_log" for col in time_columns] + likert_columns
             df = z_score_standardize(df, columns_to_standardize)
 
-            # 6. 元のカラムを削除し、標準化されたデータを新規カラムとして挿入
+            # 7. 元のカラムを削除し、標準化されたデータを新規カラムとして挿入
             for col in time_columns:
                 df = df.drop(columns=[col])
                 df = df.rename(columns={f"{col}_log": f"{col}_standardized"})
