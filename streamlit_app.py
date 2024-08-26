@@ -1,31 +1,70 @@
-# Streamlitライブラリをインポート
 import streamlit as st
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+import io
 
-# ページ設定（タブに表示されるタイトル、表示幅）
-st.set_page_config(page_title="タイトル", layout="wide")
+def log_transform(x):
+    return np.log1p(x)
 
-# タイトルを設定
-st.title('Streamlitのサンプルアプリ')
+def z_score_standardize(df, columns):
+    scaler = StandardScaler()
+    df[columns] = scaler.fit_transform(df[columns])
+    return df
 
-# テキスト入力ボックスを作成し、ユーザーからの入力を受け取る
-user_input = st.text_input('あなたの名前を入力してください')
+def main():
+    st.title("時間データとリッカート尺度データの縮約アプリ")
 
-# ボタンを作成し、クリックされたらメッセージを表示
-if st.button('挨拶する'):
-    if user_input:  # 名前が入力されているかチェック
-        st.success(f'🌟 こんにちは、{user_input}さん! 🌟')  # メッセージをハイライト
-    else:
-        st.error('名前を入力してください。')  # エラーメッセージを表示
+    # 1. Excelファイルのアップロード
+    uploaded_file = st.file_uploader("Excelファイルをアップロードしてください", type=["xlsx"])
 
-# スライダーを作成し、値を選択
-number = st.slider('好きな数字（10進数）を選んでください', 0, 100)
+    if uploaded_file is not None:
+        # 2. Excelファイルをデータフレームに変換
+        df = pd.read_excel(uploaded_file)
+        st.write("データプレビュー:")
+        st.write(df.head())
 
-# 補足メッセージ
-st.caption("十字キー（左右）でも調整できます。")
+        # 3. 時間（分）のカラムとリッカート尺度のカラムを選択
+        all_columns = df.columns.tolist()
+        time_columns = st.multiselect("時間（分）のカラムを選択してください", all_columns)
+        likert_columns = st.multiselect("リッカート尺度のカラムを選択してください", all_columns)
 
-# 選択した数字を表示
-st.write(f'あなたが選んだ数字は「{number}」です。')
+        if time_columns or likert_columns:
+            # 4. 時間データにlog(x + 1)変換を適用
+            for col in time_columns:
+                new_col_name = f"{col}_log"
+                df[new_col_name] = log_transform(df[col])
 
-# 選択した数値を2進数に変換
-binary_representation = bin(number)[2:]  # 'bin'関数で2進数に変換し、先頭の'0b'を取り除く
-st.info(f'🔢 10進数の「{number}」を2進数で表現すると「{binary_representation}」になります。 🔢')  # 2進数の表示をハイライト
+            # 5. Z-score標準化
+            columns_to_standardize = [f"{col}_log" for col in time_columns] + likert_columns
+            df = z_score_standardize(df, columns_to_standardize)
+
+            # 6. 元のカラムを削除し、標準化されたデータを新規カラムとして挿入
+            for col in time_columns:
+                df = df.drop(columns=[col])
+                df = df.rename(columns={f"{col}_log": f"{col}_standardized"})
+
+            for col in likert_columns:
+                df = df.rename(columns={col: f"{col}_standardized"})
+
+            st.write("処理後のデータプレビュー:")
+            st.write(df.head())
+
+            # 処理済みデータの統計情報
+            st.write("処理済みデータの統計情報:")
+            st.write(df[[col for col in df.columns if col.endswith('_standardized')]].describe())
+
+            # 処理済みデータのダウンロード
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Sheet1')
+            output.seek(0)
+            st.download_button(
+                label="処理済みデータをダウンロード",
+                data=output,
+                file_name="processed_data.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+if __name__ == "__main__":
+    main()
